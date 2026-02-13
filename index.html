@@ -1,0 +1,75 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Secure Voice Encryption - Login</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body class="auth-page">
+  <div class="auth-hearts" aria-hidden="true">
+    <span>&#10084;</span>
+    <span>&#10084;</span>
+    <span>&#10084;</span>
+    <span>&#10084;</span>
+    <span>&#10084;</span>
+    <span>&#10084;</span>
+    <span>&#10084;</span>
+    <span>&#10084;</span>
+    <span>&#10084;</span>
+    <span>&#10084;</span>
+  </div>
+
+  <main class="container auth-container">
+    <section class="brand-card">
+      <h1>Secure Voice Encryption</h1>
+      <p>Register, record, encrypt, and decrypt your voice directly in the browser.</p>
+    </section>
+
+    <section class="panel">
+      <div class="panel-header">
+        <h2>Welcome</h2>
+        <p>Use your account to access encrypted voice storage.</p>
+      </div>
+
+      <div id="authFeedback" class="feedback" aria-live="polite"></div>
+
+      <div class="auth-single">
+        <form id="registerForm" class="card-form auth-form is-active" autocomplete="off">
+          <h3>Create Account</h3>
+
+          <label for="registerUsername">Username</label>
+          <input id="registerUsername" type="text" required minlength="3" maxlength="24" placeholder="e.g. alice_01" />
+
+          <label for="registerPassword">Password</label>
+          <input id="registerPassword" type="password" required minlength="8" placeholder="Minimum 8 characters" />
+
+          <label for="registerConfirmPassword">Confirm Password</label>
+          <input id="registerConfirmPassword" type="password" required minlength="8" placeholder="Repeat password" />
+
+          <button type="submit" class="btn btn-primary">Register</button>
+          <p class="switch-text">Already registered? <button id="showLoginBtn" type="button" class="link-btn">Login here</button></p>
+        </form>
+
+        <form id="loginForm" class="card-form auth-form" autocomplete="off">
+          <h3>Login</h3>
+
+          <label for="loginUsername">Username</label>
+          <input id="loginUsername" type="text" required placeholder="Your username" />
+
+          <label for="loginPassword">Password</label>
+          <input id="loginPassword" type="password" required placeholder="Your password" />
+
+          <button type="submit" class="btn btn-secondary">Login</button>
+          <p class="switch-text">New user? <button id="showRegisterBtn" type="button" class="link-btn">Register first</button></p>
+        </form>
+      </div>
+    </section>
+  </main>
+
+  <script src="script.js"></script>
+</body>
+</html>

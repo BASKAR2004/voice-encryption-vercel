@@ -1,0 +1,67 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Secure Voice Encryption - Chat</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body class="app-page">
+  <main class="container app-container" id="appRoot">
+    <header class="app-header">
+      <div>
+        <h1>Secure User Chat</h1>
+        <p id="welcomeText"></p>
+      </div>
+      <button id="logoutBtn" class="btn btn-danger">Logout</button>
+    </header>
+
+    <section class="panel">
+      <div id="appFeedback" class="feedback" aria-live="polite"></div>
+
+      <section class="chat-section">
+        <h3>Direct User Chat</h3>
+        <p class="hint">Send text and encrypted voice messages to registered users.</p>
+
+        <div class="whatsapp-layout">
+          <aside class="chat-users">
+            <h4>Users</h4>
+            <div id="chatUsersList" class="chat-users-list"></div>
+          </aside>
+
+          <div class="chat-thread-panel">
+            <div id="activeChatHeader" class="active-chat-header">Select a user to start chatting</div>
+            <div id="activeChatStatus" class="active-chat-status"></div>
+            <div id="chatThread" class="chat-thread" aria-live="polite"></div>
+
+            <div class="chat-tools">
+              <label for="chatSecretKey">Secret Key (for voice encrypt/decrypt)</label>
+              <input id="chatSecretKey" type="password" placeholder="Enter secret key" />
+            </div>
+
+            <div class="voice-actions">
+              <button id="recordVoiceBtn" type="button" class="btn btn-primary">Record Voice</button>
+              <button id="stopVoiceBtn" type="button" class="btn btn-secondary" disabled>Stop</button>
+              <button id="sendVoiceBtn" type="button" class="btn btn-secondary" disabled>Send Encrypted Voice</button>
+              <span id="recordingState" class="state-badge idle">Idle</span>
+            </div>
+
+            <audio id="voicePreview" class="voice-preview" controls></audio>
+
+            <form id="directChatForm" class="chat-form" autocomplete="off">
+              <input id="directChatInput" type="text" maxlength="500" placeholder="Type a message" required />
+              <button type="submit" class="btn btn-secondary chat-send">Send</button>
+            </form>
+          </div>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.2.0/crypto-js.min.js"></script>
+  <script src="script.js"></script>
+</body>
+</html>
