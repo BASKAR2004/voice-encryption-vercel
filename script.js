@@ -719,20 +719,25 @@
         bubble.appendChild(voicePill);
 
         const cacheKey = String(message.id);
+        const decryptButton = document.createElement("button");
+        decryptButton.type = "button";
+        decryptButton.className = "decrypt-btn";
+        decryptButton.dataset.messageId = cacheKey;
+        decryptButton.textContent = "Enter Key & Decrypt";
+        bubble.appendChild(decryptButton);
+
         const decryptedAudio = decryptedAudioCache.get(cacheKey);
         if (decryptedAudio) {
+          const unlockedLabel = document.createElement("div");
+          unlockedLabel.className = "chat-meta";
+          unlockedLabel.textContent = "Decrypted audio (visible after key)";
+          bubble.appendChild(unlockedLabel);
+
           const audio = document.createElement("audio");
           audio.className = "voice-audio";
           audio.controls = true;
           audio.src = decryptedAudio;
           bubble.appendChild(audio);
-        } else {
-          const decryptButton = document.createElement("button");
-          decryptButton.type = "button";
-          decryptButton.className = "decrypt-btn";
-          decryptButton.dataset.messageId = cacheKey;
-          decryptButton.textContent = "Decrypt & Play";
-          bubble.appendChild(decryptButton);
         }
       } else {
         const text = document.createElement("div");
