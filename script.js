@@ -1,7 +1,6 @@
-﻿(() => {
-  const USERS_KEY = "ve_users_v1";
+(() => {
   const CURRENT_USER_KEY = "ve_current_user";
-  const ONLINE_TIMEOUT_MS = 25000;
+  const POLL_INTERVAL_MS = 3000;
 
   const registerForm = document.getElementById("registerForm");
   const loginForm = document.getElementById("loginForm");
@@ -13,6 +12,23 @@
 
   if (appRoot) {
     initAppPage();
+  }
+
+  async function api(path, options = {}) {
+    const response = await fetch(path, {
+      headers: {
+        "Content-Type": "application/json",
+        ...(options.headers || {})
+      },
+      ...options
+    });
+
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(data.error || "Request failed.");
+    }
+
+    return data;
   }
 
   function initAuthPage() {
@@ -41,39 +57,27 @@
         setFeedback(feedback, "Username must be 3-24 chars: letters, numbers, underscore.", "error");
         return;
       }
-
       if (password.length < 8) {
         setFeedback(feedback, "Password must be at least 8 characters.", "error");
         return;
       }
-
       if (password !== confirmPassword) {
         setFeedback(feedback, "Password confirmation does not match.", "error");
         return;
       }
 
-      const users = getUsers();
-
-      if (users[username]) {
-        setFeedback(feedback, "Username already exists. Please login.", "warn");
+      try {
+        await api("/api/register", {
+          method: "POST",
+          body: JSON.stringify({ username, password })
+        });
+        setFeedback(feedback, "Registration successful. Please login now.", "ok");
+        registerForm.reset();
         showAuthForm("login");
         document.getElementById("loginUsername").value = username;
-        return;
+      } catch (error) {
+        setFeedback(feedback, error.message, "error");
       }
-
-      const salt = generateSalt();
-      const passwordHash = await hashPassword(password, salt);
-
-      users[username] = {
-        salt,
-        passwordHash
-      };
-
-      saveUsers(users);
-      setFeedback(feedback, "Registration successful. Please login now.", "ok");
-      registerForm.reset();
-      showAuthForm("login");
-      document.getElementById("loginUsername").value = username;
     });
 
     loginForm.addEventListener("submit", async (event) => {
@@ -87,26 +91,21 @@
         return;
       }
 
-      const users = getUsers();
-      const user = users[username];
+      try {
+        const result = await api("/api/login", {
+          method: "POST",
+          body: JSON.stringify({ username, password })
+        });
 
-      if (!user) {
-        setFeedback(feedback, "Account not found. Please register first.", "error");
-        return;
-      }
+        localStorage.setItem(CURRENT_USER_KEY, result.username);
+        setFeedback(feedback, "Login successful. Redirecting...", "ok");
 
-      const passwordHash = await hashPassword(password, user.salt);
-      if (passwordHash !== user.passwordHash) {
+        setTimeout(() => {
+          window.location.href = "app.html";
+        }, 500);
+      } catch {
         setFeedback(feedback, "Invalid username or password.", "error");
-        return;
       }
-
-      localStorage.setItem(CURRENT_USER_KEY, username);
-      setFeedback(feedback, "Login successful. Redirecting...", "ok");
-
-      setTimeout(() => {
-        window.location.href = "app.html";
-      }, 500);
     });
   }
 
@@ -131,7 +130,6 @@
 
   function initAppPage() {
     const currentUser = localStorage.getItem(CURRENT_USER_KEY);
-
     if (!currentUser) {
       window.location.href = "index.html";
       return;
@@ -163,36 +161,81 @@
     let availableUsers = [];
     let activePeer = null;
     const decryptedAudioCache = new Map();
-    const readState = loadReadState(currentUser);
+    let readState = {};
 
     welcomeText.textContent = `Logged in as: ${currentUser}`;
 
-    setUserPresence(currentUser, true);
-    const presenceTimer = setInterval(() => {
-      setUserPresence(currentUser, true);
-      refreshUsersAndChat();
-    }, 10000);
+    const setPresence = async (online) => {
+      try {
+        await api("/api/presence", {
+          method: "POST",
+          body: JSON.stringify({ username: currentUser, online })
+        });
+      } catch {
+        // Ignore transient presence errors.
+      }
+    };
 
-    window.addEventListener("beforeunload", () => {
-      setUserPresence(currentUser, false);
-    });
+    const refreshUsersAndChat = async () => {
+      try {
+        const usersRes = await api(`/api/users?currentUser=${encodeURIComponent(currentUser)}`);
+        const readRes = await api(`/api/read-state/${encodeURIComponent(currentUser)}`);
 
+        availableUsers = usersRes.users || [];
+        readState = readRes.readState || {};
+
+        if (!availableUsers.includes(activePeer)) {
+          activePeer = availableUsers.length ? availableUsers[0] : null;
+        }
+
+        if (activePeer) {
+          await markConversationRead(currentUser, activePeer, readState);
+        }
+
+        await renderUsersList(currentUser, availableUsers, activePeer, chatUsersList, readState, handlePeerSelect);
+        await renderDirectThread(currentUser, activePeer, chatThread, activeChatHeader, activeChatStatus, decryptedAudioCache);
+
+        const canChat = Boolean(activePeer);
+        directChatInput.disabled = !canChat;
+        directChatSendBtn.disabled = !canChat;
+        chatSecretKey.disabled = !canChat;
+        recordVoiceBtn.disabled = !canChat;
+        stopVoiceBtn.disabled = true;
+        sendVoiceBtn.disabled = !recordedAudioDataUrl || !canChat;
+      } catch {
+        setFeedback(feedback, "Unable to load chat data. Is the backend running?", "error");
+      }
+    };
+
+    setPresence(true);
     refreshUsersAndChat();
 
-    logoutBtn.addEventListener("click", () => {
-      setUserPresence(currentUser, false);
+    const presenceTimer = setInterval(() => {
+      setPresence(true);
+    }, 10000);
+
+    const pollTimer = setInterval(() => {
+      refreshUsersAndChat();
+    }, POLL_INTERVAL_MS);
+
+    window.addEventListener("beforeunload", () => {
+      fetch("/api/presence", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: currentUser, online: false }),
+        keepalive: true
+      }).catch(() => {});
+    });
+
+    logoutBtn.addEventListener("click", async () => {
+      await setPresence(false);
       clearInterval(presenceTimer);
+      clearInterval(pollTimer);
       localStorage.removeItem(CURRENT_USER_KEY);
       window.location.href = "index.html";
     });
 
-    window.addEventListener("storage", (event) => {
-      if (!event.key || event.key.startsWith("ve_chat_") || event.key === USERS_KEY || event.key.startsWith("ve_presence_")) {
-        refreshUsersAndChat();
-      }
-    });
-
-    directChatForm.addEventListener("submit", (event) => {
+    directChatForm.addEventListener("submit", async (event) => {
       event.preventDefault();
       const messageText = directChatInput.value.trim();
 
@@ -205,7 +248,7 @@
         return;
       }
 
-      appendDirectMessage(currentUser, activePeer, {
+      await appendDirectMessage(currentUser, activePeer, {
         id: generateMessageId(),
         from: currentUser,
         to: activePeer,
@@ -215,8 +258,7 @@
       });
 
       directChatInput.value = "";
-      renderUsersList(currentUser, availableUsers, activePeer, chatUsersList, readState, handlePeerSelect);
-      renderDirectThread(currentUser, activePeer, chatThread, activeChatHeader, activeChatStatus, decryptedAudioCache);
+      await refreshUsersAndChat();
     });
 
     recordVoiceBtn.addEventListener("click", async () => {
@@ -263,12 +305,11 @@
       if (mediaRecorder && mediaRecorder.state === "recording") {
         mediaRecorder.stop();
       }
-
       recordVoiceBtn.disabled = false;
       stopVoiceBtn.disabled = true;
     });
 
-    sendVoiceBtn.addEventListener("click", () => {
+    sendVoiceBtn.addEventListener("click", async () => {
       if (!activePeer) {
         setFeedback(feedback, "Select a user to send voice.", "warn");
         return;
@@ -286,8 +327,7 @@
       }
 
       const encryptedAudio = CryptoJS.AES.encrypt(recordedAudioDataUrl, key).toString();
-
-      appendDirectMessage(currentUser, activePeer, {
+      await appendDirectMessage(currentUser, activePeer, {
         id: generateMessageId(),
         from: currentUser,
         to: activePeer,
@@ -302,17 +342,12 @@
       sendVoiceBtn.disabled = true;
 
       setFeedback(feedback, "Encrypted voice sent in chat.", "ok");
-      renderUsersList(currentUser, availableUsers, activePeer, chatUsersList, readState, handlePeerSelect);
-      renderDirectThread(currentUser, activePeer, chatThread, activeChatHeader, activeChatStatus, decryptedAudioCache);
+      await refreshUsersAndChat();
     });
 
-    chatThread.addEventListener("click", (event) => {
+    chatThread.addEventListener("click", async (event) => {
       const target = event.target;
-      if (!(target instanceof HTMLElement)) {
-        return;
-      }
-
-      if (!activePeer) {
+      if (!(target instanceof HTMLElement) || !activePeer) {
         return;
       }
 
@@ -328,7 +363,7 @@
           return;
         }
 
-        const messages = loadDirectMessages(currentUser, activePeer);
+        const messages = await loadDirectMessages(currentUser, activePeer);
         const message = messages.find((entry) => String(entry.id) === String(messageId) && entry.type === "audio");
 
         if (!message) {
@@ -347,7 +382,7 @@
 
           decryptedAudioCache.set(String(message.id), decryptedAudioData);
           setFeedback(feedback, "Voice message decrypted. You can now play it.", "ok");
-          renderDirectThread(currentUser, activePeer, chatThread, activeChatHeader, activeChatStatus, decryptedAudioCache);
+          await renderDirectThread(currentUser, activePeer, chatThread, activeChatHeader, activeChatStatus, decryptedAudioCache);
         } catch {
           setFeedback(feedback, "Decryption failed. Check your key.", "error");
         }
@@ -361,7 +396,7 @@
           return;
         }
 
-        const messages = loadDirectMessages(currentUser, activePeer);
+        const messages = await loadDirectMessages(currentUser, activePeer);
         const message = messages.find((entry) => String(entry.id) === String(messageId));
 
         if (!message || message.from !== currentUser || message.type !== "text") {
@@ -379,15 +414,13 @@
           return;
         }
 
-        updateDirectMessage(currentUser, activePeer, messageId, (entry) => ({
-          ...entry,
+        await updateDirectMessage(currentUser, activePeer, messageId, {
           text: nextText,
           edited: true,
           editedAt: new Date().toISOString()
-        }));
+        });
 
-        renderUsersList(currentUser, availableUsers, activePeer, chatUsersList, readState, handlePeerSelect);
-        renderDirectThread(currentUser, activePeer, chatThread, activeChatHeader, activeChatStatus, decryptedAudioCache);
+        await refreshUsersAndChat();
         return;
       }
 
@@ -397,7 +430,7 @@
           return;
         }
 
-        const messages = loadDirectMessages(currentUser, activePeer);
+        const messages = await loadDirectMessages(currentUser, activePeer);
         const message = messages.find((entry) => String(entry.id) === String(messageId));
 
         if (!message || message.from !== currentUser) {
@@ -409,41 +442,17 @@
           return;
         }
 
-        removeDirectMessage(currentUser, activePeer, messageId);
+        await removeDirectMessage(currentUser, activePeer, messageId);
         decryptedAudioCache.delete(String(messageId));
-        renderUsersList(currentUser, availableUsers, activePeer, chatUsersList, readState, handlePeerSelect);
-        renderDirectThread(currentUser, activePeer, chatThread, activeChatHeader, activeChatStatus, decryptedAudioCache);
+        await refreshUsersAndChat();
       }
     });
 
-    function handlePeerSelect(peer) {
+    async function handlePeerSelect(peer) {
       activePeer = peer;
-      markConversationRead(currentUser, activePeer, readState);
-      renderUsersList(currentUser, availableUsers, activePeer, chatUsersList, readState, handlePeerSelect);
-      renderDirectThread(currentUser, activePeer, chatThread, activeChatHeader, activeChatStatus, decryptedAudioCache);
-    }
-
-    function refreshUsersAndChat() {
-      availableUsers = Object.keys(getUsers()).filter((name) => name !== currentUser);
-
-      if (!availableUsers.includes(activePeer)) {
-        activePeer = availableUsers.length ? availableUsers[0] : null;
-      }
-
-      if (activePeer) {
-        markConversationRead(currentUser, activePeer, readState);
-      }
-
-      renderUsersList(currentUser, availableUsers, activePeer, chatUsersList, readState, handlePeerSelect);
-      renderDirectThread(currentUser, activePeer, chatThread, activeChatHeader, activeChatStatus, decryptedAudioCache);
-
-      const canChat = Boolean(activePeer);
-      directChatInput.disabled = !canChat;
-      directChatSendBtn.disabled = !canChat;
-      chatSecretKey.disabled = !canChat;
-      recordVoiceBtn.disabled = !canChat;
-      stopVoiceBtn.disabled = true;
-      sendVoiceBtn.disabled = !recordedAudioDataUrl || !canChat;
+      await markConversationRead(currentUser, activePeer, readState);
+      await renderUsersList(currentUser, availableUsers, activePeer, chatUsersList, readState, handlePeerSelect);
+      await renderDirectThread(currentUser, activePeer, chatThread, activeChatHeader, activeChatStatus, decryptedAudioCache);
     }
   }
 
@@ -461,119 +470,37 @@
     return /^[a-zA-Z0-9_]{3,24}$/.test(username);
   }
 
-  function getUsers() {
-    try {
-      return JSON.parse(localStorage.getItem(USERS_KEY)) || {};
-    } catch {
-      return {};
-    }
-  }
-
-  function saveUsers(users) {
-    localStorage.setItem(USERS_KEY, JSON.stringify(users));
-  }
-
-  function generateSalt() {
-    const array = new Uint8Array(16);
-    crypto.getRandomValues(array);
-    return bytesToBase64(array);
-  }
-
-  async function hashPassword(password, salt) {
-    const data = new TextEncoder().encode(`${salt}:${password}`);
-    const digest = await crypto.subtle.digest("SHA-256", data);
-    return bytesToBase64(new Uint8Array(digest));
-  }
-
-  function bytesToBase64(bytes) {
-    let binary = "";
-    bytes.forEach((b) => {
-      binary += String.fromCharCode(b);
-    });
-    return btoa(binary);
-  }
-
   function generateMessageId() {
     return `m_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   }
 
-  function getDirectChatKey(userA, userB) {
-    const sorted = [userA, userB].sort();
-    return `ve_chat_${sorted[0]}_${sorted[1]}`;
+  async function loadDirectMessages(userA, userB) {
+    const response = await api(`/api/messages/${encodeURIComponent(userA)}/${encodeURIComponent(userB)}`);
+    return Array.isArray(response.messages) ? response.messages : [];
   }
 
-  function loadDirectMessages(userA, userB) {
-    const key = getDirectChatKey(userA, userB);
-    let messages;
-
-    try {
-      messages = JSON.parse(localStorage.getItem(key)) || [];
-    } catch {
-      return [];
-    }
-
-    if (!Array.isArray(messages)) {
-      return [];
-    }
-
-    let changed = false;
-
-    const normalized = messages.map((entry) => {
-      const message = { ...entry };
-
-      if (!message.id) {
-        message.id = generateMessageId();
-        changed = true;
-      }
-
-      if (!message.type) {
-        message.type = message.encryptedAudio ? "audio" : "text";
-        changed = true;
-      }
-
-      if (!message.timestamp) {
-        message.timestamp = new Date().toISOString();
-        changed = true;
-      }
-
-      return message;
+  async function appendDirectMessage(userA, userB, message) {
+    await api(`/api/messages/${encodeURIComponent(userA)}/${encodeURIComponent(userB)}`, {
+      method: "POST",
+      body: JSON.stringify({ message })
     });
-
-    if (changed) {
-      localStorage.setItem(key, JSON.stringify(normalized));
-    }
-
-    return normalized;
   }
 
-  function appendDirectMessage(userA, userB, message) {
-    const key = getDirectChatKey(userA, userB);
-    const messages = loadDirectMessages(userA, userB);
-    messages.push(message);
-    localStorage.setItem(key, JSON.stringify(messages));
-  }
-
-  function updateDirectMessage(userA, userB, messageId, updater) {
-    const key = getDirectChatKey(userA, userB);
-    const messages = loadDirectMessages(userA, userB);
-    const updated = messages.map((entry) => {
-      if (String(entry.id) !== String(messageId)) {
-        return entry;
-      }
-      return updater(entry);
+  async function updateDirectMessage(userA, userB, messageId, message) {
+    await api(`/api/messages/${encodeURIComponent(userA)}/${encodeURIComponent(userB)}/${encodeURIComponent(messageId)}`, {
+      method: "PUT",
+      body: JSON.stringify({ message })
     });
-    localStorage.setItem(key, JSON.stringify(updated));
   }
 
-  function removeDirectMessage(userA, userB, messageId) {
-    const key = getDirectChatKey(userA, userB);
-    const messages = loadDirectMessages(userA, userB);
-    const filtered = messages.filter((entry) => String(entry.id) !== String(messageId));
-    localStorage.setItem(key, JSON.stringify(filtered));
+  async function removeDirectMessage(userA, userB, messageId) {
+    await api(`/api/messages/${encodeURIComponent(userA)}/${encodeURIComponent(userB)}/${encodeURIComponent(messageId)}`, {
+      method: "DELETE"
+    });
   }
 
-  function getLastMessagePreview(currentUser, peer) {
-    const messages = loadDirectMessages(currentUser, peer);
+  async function getLastMessagePreview(currentUser, peer) {
+    const messages = await loadDirectMessages(currentUser, peer);
     if (!messages.length) {
       return "No messages yet";
     }
@@ -587,34 +514,25 @@
     return `${prefix}${last.text}`;
   }
 
-  function getUnreadCount(currentUser, peer, readState) {
+  async function getUnreadCount(currentUser, peer, readState) {
     const lastRead = Number(readState[peer] || 0);
-    const messages = loadDirectMessages(currentUser, peer);
+    const messages = await loadDirectMessages(currentUser, peer);
     return messages.filter((msg) => msg.from === peer && Date.parse(msg.timestamp) > lastRead).length;
   }
 
-  function getReadStateKey(currentUser) {
-    return `ve_read_${currentUser}`;
+  async function saveReadState(currentUser, readState) {
+    await api(`/api/read-state/${encodeURIComponent(currentUser)}`, {
+      method: "PUT",
+      body: JSON.stringify({ readState })
+    });
   }
 
-  function loadReadState(currentUser) {
-    try {
-      return JSON.parse(localStorage.getItem(getReadStateKey(currentUser))) || {};
-    } catch {
-      return {};
-    }
-  }
-
-  function saveReadState(currentUser, readState) {
-    localStorage.setItem(getReadStateKey(currentUser), JSON.stringify(readState));
-  }
-
-  function markConversationRead(currentUser, peer, readState) {
+  async function markConversationRead(currentUser, peer, readState) {
     if (!peer) {
       return;
     }
 
-    const messages = loadDirectMessages(currentUser, peer);
+    const messages = await loadDirectMessages(currentUser, peer);
     const latestPeerMessageTs = messages
       .filter((msg) => msg.from === peer)
       .map((msg) => Date.parse(msg.timestamp))
@@ -623,28 +541,13 @@
 
     if (latestPeerMessageTs) {
       readState[peer] = latestPeerMessageTs;
-      saveReadState(currentUser, readState);
+      await saveReadState(currentUser, readState);
     }
   }
 
-  function getPresenceKey(username) {
-    return `ve_presence_${username}`;
-  }
-
-  function setUserPresence(username, online) {
-    const payload = {
-      online,
-      lastActive: new Date().toISOString()
-    };
-    localStorage.setItem(getPresenceKey(username), JSON.stringify(payload));
-  }
-
-  function getUserPresence(username) {
-    try {
-      return JSON.parse(localStorage.getItem(getPresenceKey(username))) || null;
-    } catch {
-      return null;
-    }
+  async function getUserPresence(username) {
+    const response = await api(`/api/presence/${encodeURIComponent(username)}`);
+    return response.presence || null;
   }
 
   function isUserOnline(presence) {
@@ -657,7 +560,7 @@
       return false;
     }
 
-    return presence.online && Date.now() - last <= ONLINE_TIMEOUT_MS;
+    return presence.online && Date.now() - last <= 25000;
   }
 
   function getPresenceLabel(presence) {
@@ -672,7 +575,7 @@
     return `Last seen ${formatChatTime(presence.lastActive)}`;
   }
 
-  function renderUsersList(currentUser, users, activePeer, container, readState, onSelect) {
+  async function renderUsersList(currentUser, users, activePeer, container, readState, onSelect) {
     container.innerHTML = "";
 
     if (!users.length) {
@@ -683,10 +586,18 @@
       return;
     }
 
-    users.forEach((peer) => {
-      const unreadCount = getUnreadCount(currentUser, peer, readState);
-      const presence = getUserPresence(peer);
+    const loaded = await Promise.all(
+      users.map(async (peer) => {
+        const [unreadCount, presence, preview] = await Promise.all([
+          getUnreadCount(currentUser, peer, readState),
+          getUserPresence(peer),
+          getLastMessagePreview(currentUser, peer)
+        ]);
+        return { peer, unreadCount, presence, preview };
+      })
+    );
 
+    loaded.forEach(({ peer, unreadCount, presence, preview }) => {
       const item = document.createElement("button");
       item.type = "button";
       item.className = `chat-user-item ${peer === activePeer ? "active" : ""}`;
@@ -697,7 +608,6 @@
       const title = document.createElement("div");
       title.className = "chat-user-name";
       title.textContent = peer;
-
       top.appendChild(title);
 
       if (unreadCount > 0) {
@@ -711,19 +621,19 @@
       status.className = `chat-user-status ${isUserOnline(presence) ? "online" : "offline"}`;
       status.textContent = getPresenceLabel(presence);
 
-      const preview = document.createElement("div");
-      preview.className = "chat-user-preview";
-      preview.textContent = getLastMessagePreview(currentUser, peer);
+      const previewText = document.createElement("div");
+      previewText.className = "chat-user-preview";
+      previewText.textContent = preview;
 
       item.appendChild(top);
       item.appendChild(status);
-      item.appendChild(preview);
+      item.appendChild(previewText);
       item.addEventListener("click", () => onSelect(peer));
       container.appendChild(item);
     });
   }
 
-  function renderDirectThread(currentUser, peer, container, headerElement, statusElement, decryptedAudioCache) {
+  async function renderDirectThread(currentUser, peer, container, headerElement, statusElement, decryptedAudioCache) {
     container.innerHTML = "";
 
     if (!peer) {
@@ -738,10 +648,10 @@
     }
 
     headerElement.textContent = `Chat with ${peer}`;
-    statusElement.textContent = getPresenceLabel(getUserPresence(peer));
+    const peerPresence = await getUserPresence(peer);
+    statusElement.textContent = getPresenceLabel(peerPresence);
 
-    const messages = loadDirectMessages(currentUser, peer);
-
+    const messages = await loadDirectMessages(currentUser, peer);
     if (!messages.length) {
       const empty = document.createElement("p");
       empty.className = "chat-empty";
