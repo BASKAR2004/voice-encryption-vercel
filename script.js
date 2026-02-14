@@ -171,6 +171,8 @@
     const decryptedAudioCache = new Map();
     const threadCache = new Map();
     let readState = {};
+    let refreshInFlight = false;
+    let refreshQueued = false;
 
     welcomeText.textContent = `Logged in as: ${currentUser}`;
 
@@ -186,6 +188,12 @@
     };
 
     const refreshUsersAndChat = async () => {
+      if (refreshInFlight) {
+        refreshQueued = true;
+        return;
+      }
+
+      refreshInFlight = true;
       try {
         const usersRes = await api(`/api/users?currentUser=${encodeURIComponent(currentUser)}`);
         const readRes = await api(`/api/read-state/${encodeURIComponent(currentUser)}`);
@@ -213,6 +221,12 @@
         sendVoiceBtn.disabled = !recordedAudioDataUrl || !canChat;
       } catch {
         setFeedback(feedback, "Unable to load chat data. Is the backend running?", "error");
+      } finally {
+        refreshInFlight = false;
+        if (refreshQueued) {
+          refreshQueued = false;
+          refreshUsersAndChat();
+        }
       }
     };
 
