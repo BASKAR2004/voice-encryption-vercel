@@ -499,8 +499,7 @@
     });
   }
 
-  async function getLastMessagePreview(currentUser, peer) {
-    const messages = await loadDirectMessages(currentUser, peer);
+  function getLastMessagePreviewFromMessages(currentUser, messages) {
     if (!messages.length) {
       return "No messages yet";
     }
@@ -514,9 +513,8 @@
     return `${prefix}${last.text}`;
   }
 
-  async function getUnreadCount(currentUser, peer, readState) {
+  function getUnreadCountFromMessages(peer, readState, messages) {
     const lastRead = Number(readState[peer] || 0);
-    const messages = await loadDirectMessages(currentUser, peer);
     return messages.filter((msg) => msg.from === peer && Date.parse(msg.timestamp) > lastRead).length;
   }
 
@@ -576,9 +574,8 @@
   }
 
   async function renderUsersList(currentUser, users, activePeer, container, readState, onSelect) {
-    container.innerHTML = "";
-
     if (!users.length) {
+      container.innerHTML = "";
       const empty = document.createElement("p");
       empty.className = "chat-empty";
       empty.textContent = "No other registered users yet.";
@@ -588,14 +585,28 @@
 
     const loaded = await Promise.all(
       users.map(async (peer) => {
-        const [unreadCount, presence, preview] = await Promise.all([
-          getUnreadCount(currentUser, peer, readState),
-          getUserPresence(peer),
-          getLastMessagePreview(currentUser, peer)
-        ]);
+        let messages = [];
+        let presence = null;
+
+        try {
+          messages = await loadDirectMessages(currentUser, peer);
+        } catch {
+          messages = [];
+        }
+
+        try {
+          presence = await getUserPresence(peer);
+        } catch {
+          presence = null;
+        }
+
+        const unreadCount = getUnreadCountFromMessages(peer, readState, messages);
+        const preview = getLastMessagePreviewFromMessages(currentUser, messages);
         return { peer, unreadCount, presence, preview };
       })
     );
+
+    container.innerHTML = "";
 
     loaded.forEach(({ peer, unreadCount, presence, preview }) => {
       const item = document.createElement("button");
@@ -648,10 +659,20 @@
     }
 
     headerElement.textContent = `Chat with ${peer}`;
-    const peerPresence = await getUserPresence(peer);
+    let peerPresence = null;
+    try {
+      peerPresence = await getUserPresence(peer);
+    } catch {
+      peerPresence = null;
+    }
     statusElement.textContent = getPresenceLabel(peerPresence);
 
-    const messages = await loadDirectMessages(currentUser, peer);
+    let messages = [];
+    try {
+      messages = await loadDirectMessages(currentUser, peer);
+    } catch {
+      messages = [];
+    }
     if (!messages.length) {
       const empty = document.createElement("p");
       empty.className = "chat-empty";
