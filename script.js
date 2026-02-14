@@ -161,6 +161,7 @@
     let availableUsers = [];
     let activePeer = null;
     const decryptedAudioCache = new Map();
+    const threadCache = new Map();
     let readState = {};
 
     welcomeText.textContent = `Logged in as: ${currentUser}`;
@@ -193,7 +194,7 @@
         }
 
         await renderUsersList(currentUser, availableUsers, activePeer, chatUsersList, readState, handlePeerSelect);
-        await renderDirectThread(currentUser, activePeer, chatThread, activeChatHeader, activeChatStatus, decryptedAudioCache);
+        await renderDirectThread(currentUser, activePeer, chatThread, activeChatHeader, activeChatStatus, decryptedAudioCache, threadCache);
 
         const canChat = Boolean(activePeer);
         directChatInput.disabled = !canChat;
@@ -390,7 +391,7 @@
 
           decryptedAudioCache.set(String(message.id), decryptedAudioData);
           setFeedback(feedback, "Voice message decrypted. You can now play it.", "ok");
-          await renderDirectThread(currentUser, activePeer, chatThread, activeChatHeader, activeChatStatus, decryptedAudioCache);
+          await renderDirectThread(currentUser, activePeer, chatThread, activeChatHeader, activeChatStatus, decryptedAudioCache, threadCache);
         } catch {
           setFeedback(feedback, "Decryption failed. Check your key.", "error");
         }
@@ -460,7 +461,7 @@
       activePeer = peer;
       await markConversationRead(currentUser, activePeer, readState);
       await renderUsersList(currentUser, availableUsers, activePeer, chatUsersList, readState, handlePeerSelect);
-      await renderDirectThread(currentUser, activePeer, chatThread, activeChatHeader, activeChatStatus, decryptedAudioCache);
+      await renderDirectThread(currentUser, activePeer, chatThread, activeChatHeader, activeChatStatus, decryptedAudioCache, threadCache);
     }
   }
 
@@ -593,24 +594,13 @@
 
     const loaded = await Promise.all(
       users.map(async (peer) => {
-        let messages = [];
         let presence = null;
-
-        try {
-          messages = await loadDirectMessages(currentUser, peer);
-        } catch {
-          messages = [];
-        }
-
         try {
           presence = await getUserPresence(peer);
         } catch {
           presence = null;
         }
-
-        const unreadCount = getUnreadCountFromMessages(peer, readState, messages);
-        const preview = getLastMessagePreviewFromMessages(currentUser, messages);
-        return { peer, unreadCount, presence, preview };
+        return { peer, unreadCount: 0, presence, preview: "Open chat" };
       })
     );
 
@@ -652,10 +642,9 @@
     });
   }
 
-  async function renderDirectThread(currentUser, peer, container, headerElement, statusElement, decryptedAudioCache) {
-    container.innerHTML = "";
-
+  async function renderDirectThread(currentUser, peer, container, headerElement, statusElement, decryptedAudioCache, threadCache) {
     if (!peer) {
+      container.innerHTML = "";
       headerElement.textContent = "No available user to chat";
       statusElement.textContent = "";
 
@@ -676,11 +665,16 @@
     statusElement.textContent = getPresenceLabel(peerPresence);
 
     let messages = [];
+    const cacheKey = [currentUser, peer].sort().join("__");
     try {
       messages = await loadDirectMessages(currentUser, peer);
+      threadCache.set(cacheKey, messages);
     } catch {
-      messages = [];
+      messages = threadCache.get(cacheKey) || [];
     }
+
+    container.innerHTML = "";
+
     if (!messages.length) {
       const empty = document.createElement("p");
       empty.className = "chat-empty";
