@@ -32,9 +32,17 @@
   }
 
   function initAuthPage() {
+    const existingUser = localStorage.getItem(CURRENT_USER_KEY);
+    if (existingUser) {
+      window.location.href = "app.html";
+      return;
+    }
+
     const feedback = document.getElementById("authFeedback");
     const showLoginBtn = document.getElementById("showLoginBtn");
     const showRegisterBtn = document.getElementById("showRegisterBtn");
+
+    showAuthForm("login");
 
     showLoginBtn.addEventListener("click", () => {
       showAuthForm("login");
