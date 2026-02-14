@@ -8,7 +8,7 @@ const PORT = process.env.PORT || 3000;
 const DB_PATH = path.join(__dirname, "db.json");
 const ONLINE_TIMEOUT_MS = 25000;
 
-app.use(express.json({ limit: "10mb" }));
+app.use(express.json({ limit: "50mb" }));
 app.use(express.static(__dirname));
 
 function readDb() {

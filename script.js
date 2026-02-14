@@ -248,17 +248,21 @@
         return;
       }
 
-      await appendDirectMessage(currentUser, activePeer, {
-        id: generateMessageId(),
-        from: currentUser,
-        to: activePeer,
-        type: "text",
-        text: messageText,
-        timestamp: new Date().toISOString()
-      });
+      try {
+        await appendDirectMessage(currentUser, activePeer, {
+          id: generateMessageId(),
+          from: currentUser,
+          to: activePeer,
+          type: "text",
+          text: messageText,
+          timestamp: new Date().toISOString()
+        });
 
-      directChatInput.value = "";
-      await refreshUsersAndChat();
+        directChatInput.value = "";
+        await refreshUsersAndChat();
+      } catch (error) {
+        setFeedback(feedback, error.message || "Unable to send message.", "error");
+      }
     });
 
     recordVoiceBtn.addEventListener("click", async () => {
@@ -326,23 +330,27 @@
         return;
       }
 
-      const encryptedAudio = CryptoJS.AES.encrypt(recordedAudioDataUrl, key).toString();
-      await appendDirectMessage(currentUser, activePeer, {
-        id: generateMessageId(),
-        from: currentUser,
-        to: activePeer,
-        type: "audio",
-        encryptedAudio,
-        timestamp: new Date().toISOString()
-      });
+      try {
+        const encryptedAudio = CryptoJS.AES.encrypt(recordedAudioDataUrl, key).toString();
+        await appendDirectMessage(currentUser, activePeer, {
+          id: generateMessageId(),
+          from: currentUser,
+          to: activePeer,
+          type: "audio",
+          encryptedAudio,
+          timestamp: new Date().toISOString()
+        });
 
-      recordedAudioDataUrl = "";
-      voicePreview.removeAttribute("src");
-      voicePreview.load();
-      sendVoiceBtn.disabled = true;
+        recordedAudioDataUrl = "";
+        voicePreview.removeAttribute("src");
+        voicePreview.load();
+        sendVoiceBtn.disabled = true;
 
-      setFeedback(feedback, "Encrypted voice sent in chat.", "ok");
-      await refreshUsersAndChat();
+        setFeedback(feedback, "Encrypted voice sent in chat.", "ok");
+        await refreshUsersAndChat();
+      } catch (error) {
+        setFeedback(feedback, error.message || "Audio send failed. Try a shorter recording.", "error");
+      }
     });
 
     chatThread.addEventListener("click", async (event) => {
