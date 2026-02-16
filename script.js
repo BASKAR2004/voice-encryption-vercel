@@ -169,6 +169,7 @@
     let availableUsers = [];
     let activePeer = null;
     const decryptedAudioCache = new Map();
+    const maskedAudioCache = new Map();
     const threadCache = new Map();
     let readState = {};
     let refreshInFlight = false;
@@ -214,7 +215,7 @@
         const isAudioPlaying = isAnyChatAudioPlaying(chatThread);
         const shouldRenderThread = previousActivePeer !== activePeer || !isAudioPlaying;
         if (shouldRenderThread) {
-          await renderDirectThread(currentUser, activePeer, chatThread, activeChatHeader, activeChatStatus, decryptedAudioCache, threadCache);
+          await renderDirectThread(currentUser, activePeer, chatThread, activeChatHeader, activeChatStatus, decryptedAudioCache, maskedAudioCache, threadCache);
         }
 
         const canChat = Boolean(activePeer);
@@ -420,7 +421,7 @@
 
           decryptedAudioCache.set(String(message.id), decryptedAudioData);
           setFeedback(feedback, "Voice message decrypted. You can now play it.", "ok");
-          await renderDirectThread(currentUser, activePeer, chatThread, activeChatHeader, activeChatStatus, decryptedAudioCache, threadCache);
+          await renderDirectThread(currentUser, activePeer, chatThread, activeChatHeader, activeChatStatus, decryptedAudioCache, maskedAudioCache, threadCache);
         } catch {
           setFeedback(feedback, "Decryption failed. Check your key.", "error");
         }
@@ -490,7 +491,7 @@
       activePeer = peer;
       await markConversationRead(currentUser, activePeer, readState);
       await renderUsersList(currentUser, availableUsers, activePeer, chatUsersList, readState, handlePeerSelect);
-      await renderDirectThread(currentUser, activePeer, chatThread, activeChatHeader, activeChatStatus, decryptedAudioCache, threadCache);
+      await renderDirectThread(currentUser, activePeer, chatThread, activeChatHeader, activeChatStatus, decryptedAudioCache, maskedAudioCache, threadCache);
     }
   }
 
@@ -679,7 +680,7 @@
     });
   }
 
-  async function renderDirectThread(currentUser, peer, container, headerElement, statusElement, decryptedAudioCache, threadCache) {
+  async function renderDirectThread(currentUser, peer, container, headerElement, statusElement, decryptedAudioCache, maskedAudioCache, threadCache) {
     if (!peer) {
       container.innerHTML = "";
       headerElement.textContent = "No available user to chat";
@@ -732,6 +733,17 @@
         voicePill.className = "voice-pill";
         voicePill.textContent = "Encrypted voice message";
         bubble.appendChild(voicePill);
+
+        const lockedLabel = document.createElement("div");
+        lockedLabel.className = "chat-meta";
+        lockedLabel.textContent = "Locked preview audio (obfuscated)";
+        bubble.appendChild(lockedLabel);
+
+        const lockedAudio = document.createElement("audio");
+        lockedAudio.className = "voice-audio";
+        lockedAudio.controls = true;
+        lockedAudio.src = getMaskedAudioDataUrl(message, maskedAudioCache);
+        bubble.appendChild(lockedAudio);
 
         const cacheKey = String(message.id);
         const decryptButton = document.createElement("button");
@@ -810,5 +822,103 @@
       reader.onerror = reject;
       reader.readAsDataURL(blob);
     });
+  }
+
+  function getMaskedAudioDataUrl(message, maskedAudioCache) {
+    const cacheKey = String(message.id || message.encryptedAudio || "");
+    if (maskedAudioCache.has(cacheKey)) {
+      return maskedAudioCache.get(cacheKey);
+    }
+    const dataUrl = createMaskedVoiceDataUrl(String(message.encryptedAudio || cacheKey));
+    maskedAudioCache.set(cacheKey, dataUrl);
+    return dataUrl;
+  }
+
+  function createMaskedVoiceDataUrl(seedText) {
+    const sampleRate = 8000;
+    const durationSec = 1.8;
+    const sampleCount = Math.floor(sampleRate * durationSec);
+    const samples = new Uint8Array(sampleCount);
+
+    let seed = hashStringToSeed(seedText);
+    let phase = 0;
+    const carrierHz = 130 + (seed % 120);
+
+    for (let i = 0; i < sampleCount; i += 1) {
+      const t = i / sampleRate;
+      seed = nextSeed(seed);
+      const noise = (seed / 4294967295) * 2 - 1;
+      const vibrato = Math.sin(2 * Math.PI * 3.2 * t) * 28;
+      phase += (2 * Math.PI * (carrierHz + vibrato)) / sampleRate;
+      const tone = Math.sin(phase);
+      const mixed = clampSample(tone * 0.35 + noise * 0.24);
+      samples[i] = Math.round((mixed + 1) * 127.5);
+    }
+
+    return pcm8ToWavDataUrl(samples, sampleRate);
+  }
+
+  function hashStringToSeed(text) {
+    let hash = 2166136261;
+    for (let i = 0; i < text.length; i += 1) {
+      hash ^= text.charCodeAt(i);
+      hash = Math.imul(hash, 16777619);
+    }
+    return hash >>> 0;
+  }
+
+  function nextSeed(seed) {
+    return (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+  }
+
+  function clampSample(value) {
+    if (value > 1) {
+      return 1;
+    }
+    if (value < -1) {
+      return -1;
+    }
+    return value;
+  }
+
+  function pcm8ToWavDataUrl(samples, sampleRate) {
+    const channels = 1;
+    const bitsPerSample = 8;
+    const byteRate = sampleRate * channels * (bitsPerSample / 8);
+    const blockAlign = channels * (bitsPerSample / 8);
+    const dataSize = samples.length;
+    const buffer = new ArrayBuffer(44 + dataSize);
+    const view = new DataView(buffer);
+
+    writeAscii(view, 0, "RIFF");
+    view.setUint32(4, 36 + dataSize, true);
+    writeAscii(view, 8, "WAVE");
+    writeAscii(view, 12, "fmt ");
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, channels, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, byteRate, true);
+    view.setUint16(32, blockAlign, true);
+    view.setUint16(34, bitsPerSample, true);
+    writeAscii(view, 36, "data");
+    view.setUint32(40, dataSize, true);
+
+    for (let i = 0; i < dataSize; i += 1) {
+      view.setUint8(44 + i, samples[i]);
+    }
+
+    const bytes = new Uint8Array(buffer);
+    let binary = "";
+    for (let i = 0; i < bytes.length; i += 1) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    return `data:audio/wav;base64,${btoa(binary)}`;
+  }
+
+  function writeAscii(view, offset, text) {
+    for (let i = 0; i < text.length; i += 1) {
+      view.setUint8(offset + i, text.charCodeAt(i));
+    }
   }
 })();
