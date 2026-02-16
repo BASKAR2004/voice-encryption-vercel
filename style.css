@@ -194,21 +194,26 @@ input:focus {
 }
 
 .feedback {
-  min-height: 1.2rem;
+  display: none;
   margin-bottom: 0.8rem;
   font-weight: 500;
 }
 
+.feedback:not(:empty) {
+  display: block;
+  min-height: 1.2rem;
+}
+
 .feedback.ok {
-  color: var(--ok);
+  color: var(--ok, #be123c);
 }
 
 .feedback.warn {
-  color: var(--warn);
+  color: var(--warn, #9f1239);
 }
 
 .feedback.error {
-  color: var(--error);
+  color: var(--error, #b91c1c);
 }
 
 .app-container .panel {
