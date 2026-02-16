@@ -195,6 +195,7 @@
 
       refreshInFlight = true;
       try {
+        const previousActivePeer = activePeer;
         const usersRes = await api(`/api/users?currentUser=${encodeURIComponent(currentUser)}`);
         const readRes = await api(`/api/read-state/${encodeURIComponent(currentUser)}`);
 
@@ -210,7 +211,11 @@
         }
 
         await renderUsersList(currentUser, availableUsers, activePeer, chatUsersList, readState, handlePeerSelect);
-        await renderDirectThread(currentUser, activePeer, chatThread, activeChatHeader, activeChatStatus, decryptedAudioCache, threadCache);
+        const isAudioPlaying = isAnyChatAudioPlaying(chatThread);
+        const shouldRenderThread = previousActivePeer !== activePeer || !isAudioPlaying;
+        if (shouldRenderThread) {
+          await renderDirectThread(currentUser, activePeer, chatThread, activeChatHeader, activeChatStatus, decryptedAudioCache, threadCache);
+        }
 
         const canChat = Boolean(activePeer);
         const isRecording = Boolean(mediaRecorder && mediaRecorder.state === "recording");
@@ -487,6 +492,14 @@
       await renderUsersList(currentUser, availableUsers, activePeer, chatUsersList, readState, handlePeerSelect);
       await renderDirectThread(currentUser, activePeer, chatThread, activeChatHeader, activeChatStatus, decryptedAudioCache, threadCache);
     }
+  }
+
+  function isAnyChatAudioPlaying(container) {
+    if (!container) {
+      return false;
+    }
+    const audios = container.querySelectorAll("audio");
+    return Array.from(audios).some((audio) => !audio.paused && !audio.ended);
   }
 
   function setFeedback(element, message, type) {
