@@ -213,12 +213,14 @@
         await renderDirectThread(currentUser, activePeer, chatThread, activeChatHeader, activeChatStatus, decryptedAudioCache, threadCache);
 
         const canChat = Boolean(activePeer);
+        const isRecording = Boolean(mediaRecorder && mediaRecorder.state === "recording");
+
         directChatInput.disabled = !canChat;
         directChatSendBtn.disabled = !canChat;
         chatSecretKey.disabled = !canChat;
-        recordVoiceBtn.disabled = !canChat;
-        stopVoiceBtn.disabled = true;
-        sendVoiceBtn.disabled = !recordedAudioDataUrl || !canChat;
+        recordVoiceBtn.disabled = !canChat || isRecording;
+        stopVoiceBtn.disabled = !canChat || !isRecording;
+        sendVoiceBtn.disabled = !canChat || isRecording || !recordedAudioDataUrl;
       } catch {
         setFeedback(feedback, "Unable to load chat data. Is the backend running?", "error");
       } finally {
